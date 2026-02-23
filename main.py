@@ -1,11 +1,11 @@
-import os
+# main.py
 import uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from graph import build_graph
 
@@ -32,35 +32,39 @@ def serve_frontend():
 @app.post("/chat")
 async def chat(query: Query):
 
-    if not query.session_id:
-        session_id = str(uuid.uuid4())
-    else:
-        session_id = query.session_id
+    session_id = query.session_id or str(uuid.uuid4())
 
     if session_id not in sessions:
         sessions[session_id] = []
 
-    # Add user message
+    # Append user message to current state
     sessions[session_id].append(HumanMessage(content=query.message))
 
-    # Call agent
-    result = await agent.ainvoke({
-        "messages": sessions[session_id]
-    })
-
-    if not result or "messages" not in result:
+    try:
+        result = await agent.ainvoke({
+            "messages": sessions[session_id]
+        })
+    except Exception as e:
+        print("Agent failed:", e)
         return {
-            "response": "Something went wrong.",
+            "response": "The agent encountered an internal error.",
             "session_id": session_id
         }
 
-    # 🔥 IMPORTANT: overwrite with returned state
+    if not result or "messages" not in result:
+        return {
+            "response": "Agent returned empty response.",
+            "session_id": session_id
+        }
+
+    from langchain_core.messages import AIMessage
+
     sessions[session_id] = result["messages"]
 
-    # Final message
-    final_message = sessions[session_id][-1]
+    last_message = sessions[session_id][-1]
+    content = last_message.content
 
     return {
-        "response": final_message.content if final_message.content else "No response generated.",
+        "response": content,
         "session_id": session_id
     }
